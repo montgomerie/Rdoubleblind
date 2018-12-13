@@ -1,0 +1,568 @@
+---
+title: "Statistical Supplement"
+output: 
+  pdf_document: 
+    fig_crop: no
+    fig_width: 8
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+  word_document: 
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+**12 December 2018**
+
+Analyses for: Cox AR, Montgomerie R. 2018. The case for and against double-blind reviews
+
+This script assumes that the data files are in your R Project folder.
+
+This is all of the R code for the analyses of papers with 6 authors or less. See Statistical Supplement (SS1.Rmd) for the same analyses applied to the full dataset where only papers with <7 authors are analyzed.
+
+# R details and packages used
+  * File creation date: `r Sys.Date()`
+  * `r R.version.string`
+  * 'emmeans' package version: `r packageVersion("emmeans")`
+  * 'tidyverse' package version: `r packageVersion("tidyverse")`
+  * 'sjPlot' package version: `r packageVersion("sjPlot")`
+  * 'popbio' package version: `r packageVersion("popbio")`
+  
+# Load packages
+```{r, messages = FALSE, echo = FALSE}
+library(tidyverse)
+library(sjPlot)
+library(emmeans)
+library(popbio)
+```
+# Load data and create subsets 
+Dataset loaded is *GenderSurvey.csv* and contains the following variables, with one row per per published paper:
+
+ * Journal = BE for *Behavioral Ecology*, BES for *Behavioral Ecology and Sociobiology*,  AUK for *The Auk*, CONDOR for *The Condor*, and IBIS for *The Ibis*. Initial lowercase letters are to force ordering on figures and to compare the single-blind journals to the double-blind BE when calculating odds ratios
+ * IDno = a unique identification number that we gave each paper
+ * Year =  year of publication
+ * Volume = volume of the journal
+ * Issue = issue in the above volume
+ * ArticleTitle = full title of the publication
+ * FirstFemale = Y if the first authorship is female, N if not
+ * LastFemale = Y if the last authorship is female, N if not
+ * TotalFemale = total female authorships
+ * TotalMale = total female authorships
+ * TotalAuthors = total authorships
+ * TotalAmbiguous = total authorships of ambiguous gender
+ * Bird = Y if the paper is about birds, N if not
+ * anyFEM = 1 if any of the authorships are female, 0 if none
+ * firstFEM = 1 if the first authorship is female, 0 if not
+ * lastFEM = 1 if the last authorship is female, 0 if not
+ * Pfem = proportion of authorships that are female
+ * Pmale = proportion of authorships that are male
+
+From that loaded dataset, the script below constructs the following subsets as different dataframes:
+
+ * gender2 = only papers with unambiguously named authors
+ * gender3 = only those papers from gender2 with more than one author.
+ * single = only those papers from gender2 with a single author.
+ * genderProp = a summary of the total female authors to male authors in all papers from gender2
+ * Bgender2, Bgender3, Bsingle, and BgenderProp = datasets specifically for birds papers structured as above. 
+
+```{r, tidy = TRUE}
+gender <- read.csv("GenderSurvey.csv")
+
+gender <- gender %>% filter(TotalAuthors < 7) #subset only papers with <7 authors
+
+gender$Journal <- factor(gender$Journal, levels =c("BE", "BES", "AUK", "CONDOR", "IBIS")) 
+#sets up Journal so that Journals appear in this order in analyses and plots, with odds ratios calculated relative to BE
+
+gender2 <- gender %>% filter(TotalAmbiguous==0) %>% 
+  mutate(Year2= factor(Year), 
+         ScYear=Year-2010, 
+         NLAuthors=TotalAuthors-1, 
+         NLAuthorsFemale=ifelse(lastFEM==1, TotalFemale-1, TotalFemale), 
+         NLAuthorsMale=ifelse(lastFEM==0,TotalMale-1 , TotalMale )) %>%
+  mutate(anyNLFEM=ifelse(NLAuthorsFemale>0, 1, 0))
+
+gender3 <- gender2 %>%
+  filter(TotalAuthors!=1)
+single <- gender2 %>% 
+  filter(TotalAuthors==1)
+genderProp <- gender2 %>% 
+  group_by(Journal, Year, Issue, Volume, ScYear) %>%
+  summarise(TotalFemale=sum(TotalFemale), 
+            TotalMale=sum(TotalMale), 
+            TotalPaper=n(),
+            TotalAuthors=sum(TotalAuthors))%>%
+  mutate(PercFemale=TotalFemale/TotalAuthors)
+
+##just bird papers in above dataframes
+Bgender2 <- gender2 %>% filter(Bird=="Y")
+Bgender3 <- gender3 %>% filter(Bird=="Y")
+Bsingle <- single %>% filter(Bird=="Y")
+BgenderProp <- Bgender2 %>% 
+  group_by(Journal, Year, Issue, Volume, ScYear) %>%
+  summarise(TotalFemale=sum(TotalFemale), 
+            TotalMale=sum(TotalMale), 
+            TotalPaper=n(),
+            TotalAuthors=sum(TotalAuthors))%>%
+  mutate(PercFemale=TotalFemale/TotalAuthors)
+
+hist(gender$TotalAuthors, col="coral1", xlim = c(0,40), breaks=20)
+##most papers have more than 6 authors 
+```
+
+# Female authorships overall
+In these analyses, we ask whether the presence of female authorship anywhere in the paper varies with journal and year. These analyses include  papers in all journals except with any authorships of ambiguous gender.
+
+## All topics
+In these *All topics* sections, we include all papers regardless of topic. Here we control for number of authors in each paper as the likelihood that a paper will have a female authorship increases with the number of authors on a paper.
+```{r}
+##does the presence of a female authorship increase with the number of authors on a paper?
+modFem <- glm(anyFEM~TotalAuthors,family="binomial",data=gender2)
+summary(modFem)
+logi.hist.plot(gender2$TotalAuthors,gender2$anyFEM,boxp=FALSE,type="hist",col="coral1")
+
+mod_anyFem <- glm(anyFEM~Journal*ScYear +TotalAuthors,
+            family="binomial",  
+            data=gender2)
+summary(mod_anyFem)
+anova(mod_anyFem, test="Chisq")
+##interaction term is <0.25 so should be retained
+
+#plot trends
+plot_model(mod_anyFem, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTany_Fem <- emmeans(mod_anyFem, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTany_Fem)
+plot(TESTany_Fem)
+```
+**SUMMARY: **All journals except BE increased the incidence of female authorships over this period, resulting in large but non-significant (NS) interaction between Journal and Year. Overall, controlling for year, all journals had lower rates of female authorship but recently BES has been higher than BE
+
+## Bird papers only
+In these *Bird papers only* sections, we focus only on papers about birds in all 5 journals
+```{r}
+mod_anyFemBird <- glm(anyFEM~Journal*ScYear +TotalAuthors, 
+            family="binomial",  
+            data=Bgender2)
+summary(mod_anyFemBird)
+anova(mod_anyFemBird, test="Chisq")
+##interaction term is p<0.25 so should be retained
+
+#plot trends
+plot_model(mod_anyFemBird, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTany_FemBird <- emmeans(mod_anyFemBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTany_FemBird)
+plot(TESTany_FemBird)
+```
+**SUMMARY: **Virtually the same general trends as for non-bird papers except that BE shows a steeper decline over the years. For bird papers, though AUK, CONDOR and IBIS all published sig fewer papers with female authorships, on average over all years, than BE and BES
+
+# Proportion of female authorships per issue
+Another way of looking at the above analysis is to calculate the proportion of authorship that are female in each issue of each journal. This allows a clearer presentation and assessment of the changing and current contribution of female authorships to the publications and allows us to calculate CLs as needed.
+
+## All topics
+Proportion of female authors for papers on all topics
+```{r}
+mod_Pfem <- glm(cbind(TotalFemale, TotalMale) ~ ScYear *Journal, 
+            data = genderProp, 
+            family="binomial")
+
+anova(mod_Pfem, test="Chisq")
+##significant interaction term, retain
+summary(mod_Pfem)
+
+#plot trends
+plot_model(mod_Pfem, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTPFem <- emmeans(mod_Pfem, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTPFem)
+plot(TESTPFem)
+```
+**SUMMARY: **For 12018 BES had, on average, highest proportion of female authorships, sig higher than all the others, and BE sig higher than AUK and CONDOR. Over the years, BE stayed flat  but all the other journals increased.
+
+## Bird papers
+Proportion of female authors for papers on birds only
+```{r}
+mod_PfemBird <- glm(cbind(TotalFemale, TotalMale) ~ ScYear *Journal, 
+            data = BgenderProp, 
+            family="binomial")
+
+anova(mod_PfemBird, test="Chisq")
+##year*journal interaction has p>0.25, so could be omitted
+
+#plot trends
+plot_model(mod_PfemBird, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTPfemBird <- emmeans(mod_PfemBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTPfemBird)
+plot(TESTPfemBird)
+
+```
+**SUMMARY: **For bird papers all journals increased over the period, but now BES is higher than BE though NS, and all of the bird journals are sig lower than BE and BES
+
+# First-authored papers
+We treat papers with single authorships as neither first nor last authorships, and analyze them separately below.
+
+## All topics
+First-authorships on papers of all topics
+```{r}
+mod_firstFem <- glm(firstFEM~Journal*ScYear, 
+            family="binomial",  
+            data=gender3)
+summary(mod_firstFem)
+anova(mod_firstFem, test="Chisq") 
+##Interaction term <0.25 so  keep in model
+
+#plot trends
+plot_model(mod_firstFem, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTfirstFem <- emmeans(mod_firstFem, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTfirstFem)
+plot(TESTfirstFem)
+```
+**SUMMARY: **Excluding single author papers, female first authorships increased across all journals except BE which was decreased slightly over the period. On average, BES was higher than BE though NS,  and both of those are higher than the bird journals, though NS for BES.
+
+## Bird papers
+Female first-authorship in papers only on birds
+```{r}
+mod_firstFemBird <- glm(firstFEM~Journal*ScYear, 
+            family="binomial",  
+            data=Bgender3)
+summary(mod_firstFemBird)
+anova(mod_firstFemBird, test="Chisq") 
+## interaction term has p>0.25 so could be removed from model
+
+#plot trends
+plot_model(mod_firstFemBird, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal measn for 2018
+(TESTfirstFemBird <- emmeans(mod_firstFemBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTfirstFemBird)
+plot(TESTfirstFemBird)
+```
+**SUMMARY: **Female first authorships generally increased across the years for bird papers. BES has highest incidence but NS higher than BE. and CONDOR lowest, with all the bird journals lower than the behavioural ecology journals, sig compared to BE but not NS compared to BES
+
+# Last authorships
+Analysis of last authorships on papers with more than 1 author
+
+## All topics
+Female last-authorships for papers on any subject
+```{r}
+mod_lastFEM<- glm(lastFEM ~ Journal*ScYear, 
+            family="binomial", 
+            data=gender3)
+summary(mod_lastFEM)
+anova(mod_lastFEM, test="Chisq")
+## interaction term is p>0.25 so could be removed
+
+#plot trends
+plot_model(mod_lastFEM, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTlastFem <- emmeans(mod_lastFEM, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTlastFem)
+plot(TESTlastFem)
+```
+**SUMMARY: **Incidence of female last-authorships increased across years for all but CONDOR. Still, female last-authorships are substantially less common than male-last-authorships in all journals. The bird journals (AUK, CONDOR, and Ibis) have the lowest values, on average, but only AUK and IBIS significantly lower than the BES but not BE
+ 
+## Bird papers
+Last authorships for papers with more than one author
+```{r}
+mod_lastFemBird <- glm(lastFEM ~ Journal*ScYear, 
+            family="binomial", 
+            data=Bgender3)
+summary(mod_lastFemBird)
+anova(mod_lastFemBird, test="Chisq")
+
+#plot trends 
+plot_model(mod_lastFemBird, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal measn for 2018
+(TESTlastFemBird <- emmeans(mod_lastFemBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTlastFemBird)
+plot(TESTlastFemBird)
+```
+**SUMMARY: **For bird papers, female last authorships are less common than male, but there are no sig differences on average between journals and only BE, AUK, and IBIS have increased slightly over the years. 
+
+# Single-author papers
+Female authorships on single-author papers
+
+## All topics
+For papers with one author
+```{r}
+mod_single <- glm(firstFEM~Journal*ScYear, family="binomial", data=single)
+
+anova(mod_single, test="Chisq")
+##interaction term significant so retain in model
+summary(mod_single)
+
+#plot trends
+plot_model(mod_single, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTsingle <- emmeans(mod_single, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTsingle)
+plot(TESTsingle)
+```
+**SUMMARY: ** For papers of all subjects, it looks like BE has been getting WORSE about having female single authorships, while BES, CONDOR and IBIS  all improved and AUK did not change over this period. IBIS and BES are sig lower than BE. but the other journals not sig diff
+
+## Bird papers
+Single authorships on papers only about birds
+```{r}
+mod_singleBird <- glm(firstFEM~Journal*ScYear, family="binomial", 
+          data=Bsingle)
+
+anova(mod_singleBird, test="Chisq")
+##interaction term <0.25 so retain
+summary(mod_singleBird)
+
+cbind(OR = exp(coef(mod_singleBird))-1, exp(confint(mod_singleBird))-1) #calc odds ratios and 95%CL
+
+#plot trends
+plot_model(mod_singleBird, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTsingleBird <- emmeans(mod_singleBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTsingleBird)
+plot(TESTsingleBird)
+
+```
+**SUMMARY: **No sig diffs among journals or across years for single authorship papers, though there was a decline in BES and BE and increase in CONDOR and IBIS whereas AUK remained flat. IBIS sig lower than the other journals
+
+# Collaborations
+If the last author is female does this influence the proportion of female authors among the collaborators (other authors on the paper)? These analyses exclude single author papers. 
+
+## All topics
+Likelihood of female-authorships among collaborators
+```{r}
+mod_collab <- glm(cbind(NLAuthorsFemale, NLAuthorsMale)~ScYear*Journal+ lastFEM,
+            family="binomial", 
+            data=gender3)
+anova(mod_collab, test="Chisq")
+##p<0.25 for interaction so retain
+summary(mod_collab)
+
+exp(cbind(OR = coef(mod_collab), confint(mod_collab))) 
+
+#plot trends
+plot_model(mod_collab, type ="pred", terms = c("ScYear", "Journal")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTcollab <- emmeans(mod_collab, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTcollab)
+plot(TESTcollab)
+
+```
+**SUMMARY: **All journals except BE increased in the likelihood of a female collaborator when last author was female, over this period. 
+
+## Bird papers
+Female collaborators when last author is female
+```{r}
+mod_collabBird <- glm(cbind(NLAuthorsFemale, NLAuthorsMale)~ScYear*Journal+lastFEM,
+            family="binomial", 
+            data=Bgender3)
+
+anova(mod_collabBird, test="Chisq")
+
+##interaction term p>0.25 so could be removed
+summary(mod_collabBird)
+
+exp(cbind(OR = coef(mod_collabBird), confint(mod_collabBird))) #calc odds ratios and 95%CL
+
+#plot trends
+plot_model(mod_collabBird, type ="pred", 
+           terms = c("ScYear", "Journal", "lastFEM")) +theme_bw()
+
+#plot marginal means for 2018
+(TESTcollabBird <- emmeans(mod_collabBird, ~Journal | ScYear, type = "response", at=list(ScYear=8)))
+pairs(TESTcollabBird)
+plot(TESTcollabBird)
+```
+**SUMMARY: ** The proportion of female authorship in the first and middle author positions is substantially higher if the last author (collaborative lead) is female. This pattern transcends year and journal, although BE and BES tend to do better than the other journals, and female authorship is increasing
+
+# Figures for publication
+These plots were used as the basis for figures in the paper. The exported graphs were further drafted in Affinity Designer.
+
+## Proportion of female authorships
+First calculated proportions of authorships that are female-authorships for each year for the relevant metrics
+```{R}
+PropAny <- gender2 %>% 
+  group_by(Journal, Year) %>% 
+  summarize(TotalPapers=n(), 
+            AnyFemale=sum(anyFEM), 
+            TotalFemale=sum(TotalFemale), 
+            TotalAuthorships=sum(TotalAuthors)) %>%
+  mutate(PropPapersAnyFem=AnyFemale/TotalPapers, 
+         PropFemAuthorship=TotalFemale/TotalAuthorships)
+
+BPropAny <- Bgender2 %>% 
+  group_by(Journal, Year) %>% 
+  summarize(TotalPapers=n(), 
+            AnyFemale=sum(anyFEM), 
+            TotalFemale=sum(TotalFemale), 
+            TotalAuthorships=sum(TotalAuthors)) %>%
+  mutate(PropPapersAnyFem=AnyFemale/TotalPapers, 
+         PropFemAuthorship=TotalFemale/TotalAuthorships)
+
+propprom <- gender3 %>% group_by(Year, Journal) %>%
+  summarise(FemaleFirst=sum(firstFEM), 
+            FemaleLast=sum(lastFEM), 
+            TotalPapers=n()) %>%
+  mutate(PropFemFirst=FemaleFirst/TotalPapers, 
+         PropFemLast=FemaleLast/TotalPapers)
+
+propsingle <- single %>% group_by(Year, Journal) %>%
+  summarise(FemaleFirst=sum(firstFEM), 
+            TotalPapers=n()) %>%
+  mutate(PropSingle=FemaleFirst/TotalPapers)
+
+Bpropprom <- Bgender3 %>% group_by(Year, Journal) %>%
+  summarise(FemaleFirst=sum(firstFEM), 
+            FemaleLast=sum(lastFEM), 
+            TotalPapers=n()) %>%
+  mutate(PropFemFirst=FemaleFirst/TotalPapers, 
+         PropFemLast=FemaleLast/TotalPapers)
+
+Bpropsingle <- Bsingle %>% group_by(Year, Journal) %>%
+  summarise(FemaleFirst=sum(firstFEM), 
+            TotalPapers=n()) %>%
+  mutate(PropSingle=FemaleFirst/TotalPapers)
+```
+
+## Graphs
+Using those calculated proportions, made graphs using weighted GLM regression lines. 
+```{R}
+FigS1a <- ggplot(PropAny, aes(x=Year, y=PropPapersAnyFem) )+
+  geom_smooth(aes(weight=TotalPapers, color=Journal, linetype=Journal),  
+              show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, 
+              aes(shape=Journal, fill=Journal))+
+  labs(y="Papers with a \nfemale authorship", x="Year")+
+  ggthemes::theme_few(base_size = 12, base_family = )+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.5,0.95), sec.axis = dup_axis(name=NULL, labels=NULL))
+
+FigS1b<- ggplot(BPropAny, aes(x=Year, y=PropPapersAnyFem, color=Journal, shape=Journal, linetype=Journal, fill=Journal))+
+  geom_smooth(aes(weight=TotalPapers), show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, 
+              aes(shape=Journal, fill=Journal))+
+  labs(y="Bird papers with \na female authorship", x="Year")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.5,0.95), sec.axis = dup_axis(name=NULL, labels=NULL))
+
+Fig1a <- ggplot(PropAny, aes(x=Year, y=PropFemAuthorship, color=Journal, shape=Journal))+
+  geom_smooth(aes(weight=TotalPapers, linetype=Journal),se=F, show.legend = T, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, 
+              aes(shape=Journal, fill=Journal))+
+  labs(y="Female authorships", x="Year", size="n")+
+  ggthemes::theme_few(base_size = 12 )+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(sec.axis = dup_axis(name=NULL, labels=NULL))
+
+FigS2 <- ggplot(BPropAny, aes(x=Year, y=PropFemAuthorship, color=Journal, shape=Journal, fill=Journal, linetype=Journal))+
+  geom_smooth(aes(weight=TotalPapers),se=F, show.legend = F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, 
+              aes(shape=Journal, fill=Journal))+
+  labs(y="Female bird authorships", x="Year", size="n")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(sec.axis = dup_axis(name=NULL, labels=NULL))
+
+Fig2a <- ggplot(propprom, aes(x=Year, y=PropFemFirst, color=Journal,
+        linetype=Journal,  fill=Journal, shape=Journal))+
+  geom_smooth(aes(weight=TotalPapers), show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, aes(shape=Journal, fill=Journal))+
+  labs(y="Female first authorships", x="")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.1,0.6), sec.axis = dup_axis(name=NULL, labels=NULL))
+
+Fig2c <- ggplot(propprom, aes(x=Year, y=PropFemLast,linetype=Journal, 
+                              color=Journal, shape=Journal))+
+  geom_smooth(aes(weight=TotalPapers), show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, 
+              aes(shape=Journal, fill=Journal))+
+  labs(y="Female last authorships", x="Year", color=NULL, shape=NULL, linetype=NULL)+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+    scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  theme(legend.position = "bottom")+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.1,0.6), sec.axis = dup_axis(name=NULL, labels=NULL))
+
+Fig3a <- ggplot(propsingle, aes(x=Year, y=PropSingle))+
+  geom_smooth(aes(weight=TotalPapers, color=Journal, linetype=Journal),show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point(data=propsingle %>% filter(TotalPapers>2), show.legend = F, color="white", size=4, stroke=1, aes(shape=Journal, fill=Journal))+
+  geom_point(data=propsingle %>% filter(TotalPapers<3) ,show.legend = F,  size=3, stroke=1.5, aes(shape=Journal, color=Journal))+
+    labs(y="Female single authorships", x="Year", color="", shape="", linetype="", fill="")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4") )+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(sec.axis = dup_axis(name=NULL, labels=NULL))
+
+FigS3a <- ggplot(Bpropprom, aes(x=Year, y=PropFemFirst, color=Journal,linetype=Journal,  fill=Journal, shape=Journal))+
+  geom_smooth(aes(weight=TotalPapers),show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, aes(shape=Journal, fill=Journal))+
+  labs(y="Female bird \n first authorships", x="Year")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4))+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.1, 0.65), sec.axis = dup_axis(name=NULL, labels=NULL))
+  
+FigS3b <- ggplot(Bpropprom, aes(x=Year, y=PropFemLast))+
+  geom_smooth(aes(weight=TotalPapers, color=Journal, linetype=Journal),show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point( show.legend = F, color="white", size=4, stroke=1, aes(shape=Journal, fill=Journal))+
+  labs(y="Female bird \nlast authorships", x="Year", color=NULL, shape=NULL, linetype=NULL)+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_linetype_manual(values =c(1,2,1,2,3,4) )+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(limits=c(0.1, 0.65), sec.axis = dup_axis(name=NULL, labels=NULL))+
+  theme(legend.position = "bottom")
+  
+FigS4 <- ggplot(Bpropsingle, aes(x=Year, y=PropSingle))+
+    geom_smooth(aes(weight=TotalPapers, color=Journal, linetype=Journal),show.legend = F, se=F, method="glm", method.args=list(family="binomial"))+
+  geom_point(data=Bpropsingle %>% filter(TotalPapers>2), show.legend = F, color="white", size=4, stroke=1, aes(shape=Journal, fill=Journal))+
+  geom_point(data=Bpropsingle %>% filter(TotalPapers<3) ,show.legend = F,  size=3, stroke=1.5, aes(shape=Journal, color=Journal))+
+  labs(y="Female bird single authorships", x="Year", color="", shape="", linetype="", fill="")+
+  ggthemes::theme_few(base_size = 12)+
+  scale_color_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_shape_manual(values=c(21, 24, 21, 24, 22))+
+  scale_fill_manual(values=c("coral3", "coral3", "skyblue4", "skyblue4", "skyblue4"))+
+  scale_x_continuous(sec.axis = dup_axis(name=NULL, labels=NULL)) +
+  scale_y_continuous(sec.axis = dup_axis(name=NULL, labels=NULL))
+```
