@@ -12,7 +12,7 @@ output:
 editor_options: 
   chunk_output_type: inline
 ---
-**12 December 2018**
+**13 December 2018**
 
 Analyses for: Cox AR, Montgomerie R. 2018. The case for and against double-blind reviews
 
