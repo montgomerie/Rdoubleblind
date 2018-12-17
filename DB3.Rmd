@@ -1,5 +1,6 @@
 ---
 title: "Statistical Supplement"
+geometry: margin= 2cm
 output: 
   pdf_document: 
     fig_crop: no
@@ -37,6 +38,7 @@ library(sjPlot)
 library(emmeans)
 library(popbio)
 ```
+
 # Load data and create subsets 
 Dataset loaded is *GenderSurvey.csv* and contains the following variables, with one row per per published paper:
 
